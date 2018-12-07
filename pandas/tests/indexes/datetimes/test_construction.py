@@ -585,6 +585,23 @@ class TestDatetimeIndex(object):
         expected = DatetimeIndex([Timestamp('2018', tz=tz), pd.NaT])
         tm.assert_index_equal(result, expected)
 
+    def test_builder_from_data(self):
+        result = DatetimeIndex.from_data(['2018-12-07', '2018-12-08']) \
+                              .set_tz('EST') \
+                              .build()
+        expected = DatetimeIndex(['2018-12-07', '2018-12-08'], tz='EST')
+        tm.assert_index_equal(result, expected)
+
+    def test_builder_from_range(self):
+        result = DatetimeIndex.from_range(start='2018-12-07', freq='D', periods=5) \
+                              .set_name('name') \
+                              .build()
+        expected = pd.DatetimeIndex(['2018-12-07 00:00:00',
+                                     '2018-12-08 00:00:00',
+                                     '2018-12-09 00:00:00',
+                                     '2018-12-10 00:00:00',
+                                     '2018-12-11 00:00:00'], name='name')
+        tm.assert_index_equal(result, expected)        
 
 class TestTimeSeries(object):
 

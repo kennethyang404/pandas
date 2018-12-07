@@ -1324,6 +1324,72 @@ class DatetimeIndex(DatetimeArray, DatetimeIndexOpsMixin, Int64Index):
 
         return mask.nonzero()[0]
 
+    class DSTAmbiguityHandler(object):
+        INFER = 'infer'
+        NAT = 'NaT'
+        RAISE = 'raise'
+
+
+    class ClosedRange(object):
+        LEFT = 'left'
+        RIGHT = 'right'
+        BOTH = None
+
+    class Builder(object):
+        def __init__(self, source):        
+            self.source = source
+            self.kwargs = {}
+
+        def set_tz(self, tz):            
+            self.source['tz'] = tz
+            return self
+
+        def set_name(self, name):
+            self.kwargs['name'] = name
+            return self
+
+        def set_DST_ambiguity_handler(self, ambiguous):
+            self.source['ambiguous'] = ambiguous
+            return self
+
+        def set_extra_args(self, **kwargs):
+            self.kwargs.update(kwargs)
+            return self
+
+        def build(self):
+            if 'data' in self.source:
+                args = {}
+                args.update(self.source)
+                args.update(self.kwargs)
+                return DatetimeIndex(**args)    
+            else:
+                result = DatetimeIndex._generate_range(**self.source)
+                if 'name' in self.kwargs:
+                    result.name = self.kwargs['name']
+                return result
+
+    @classmethod
+    def from_data(cls, data, copy=False):
+        source = {
+            'data': data,
+            'copy': copy
+        }
+        return cls.Builder(source)
+
+    @classmethod
+    def from_range(cls, start=None, end=None, periods=None,
+                   freq=None, closed=None):
+        if (start, end, periods, freq).count(None) != 1:
+            raise ValueError("Exactly 3 arguments must be specified for range.")
+
+        source = {
+            'start': start,
+            'end': end,
+            'periods': periods,
+            'freq': freq,
+            'closed': closed
+        }
+        return cls.Builder(source)
 
 DatetimeIndex._add_comparison_ops()
 DatetimeIndex._add_numeric_methods_disabled()
