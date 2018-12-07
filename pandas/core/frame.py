@@ -782,6 +782,13 @@ class DataFrame(NDFrame):
             for i, k in enumerate(self.columns):
                 yield k, self._ixs(i, axis=1)
 
+    def itercols(self):
+        """
+        Renaming of iteritems().
+        """
+        for col in self.iteritems():
+            yield col
+
     def iterrows(self):
         """
         Iterate over DataFrame rows as (index, Series) pairs.
