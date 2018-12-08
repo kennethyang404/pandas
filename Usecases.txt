@@ -1,0 +1,133 @@
+Part I. DataFrame Creation
+
+1. Just a DataFrame
+
+    '''
+    import pandas as pd
+    import pickle
+
+    with open('somedata.pickle', 'rb') as handle:
+        somesource = pickle.load(handle)
+
+    df = pd.DataFrame(somesource)
+    '''
+
+    The user code is clean and succinct, but it lacks information. It does not state clearly what somesource is: a dict? an structured or homogeneous ndarray? or a list of lists? Now if someone else needs to add index to this DataFrame, he might just modify the last line to be:
+
+    '''
+    df = pd.DataFrame(somesource, index=myindex)
+    '''
+
+    because the documentation of DataFrame constructor says that index option specifies "Index to use for resulting frame". This might not work out as expected, because the documentation missed out important information about the different behaviors of setting index option between different input data types. It is important that the API shows clear what type the data source is. We will talk more about the afore-mentioned "different behaviors" in the next usecase.
+
+-------------------------------------------------------------------
+User code after modification:
+
+    import pandas as pd
+    import pickle
+
+    with open('somedata.pickle', 'rb') as handle:
+        somesource = pickle.load(handle)
+
+    df = pd.DataFrame.from_dict(somesource).build()
+===================================================================
+
+2. Specifying index/columns for dict input
+
+    df1 = pd.DataFrame(somendarray, index=[1, 2, 3, 4])
+    df2 = pd.DataFrame(somedictofdicts, index=['a', 'b', 'c', 'd'])
+
+    As we mentioned in last usecase, the documentation of DataFrame constructor says that index option specifies "Index to use for resulting frame". Well it doesn't say clearly how the specified index will be used. Let's assume all dimensions align, df1 will behave as we expected: the index would be an ordered array of integers: [1, 2, 3, 4]. It is well defined because the input is an ndarray which has ordered rows. df2, however, makes any careful programmer wonder, how exactly are the elements in the index parameter matched to the rows generated from a dictionary, which essentially are unordered. First of all, the order of the rows are not deterministic if two dicts containing exactly the same information have their key:value pairs inserted/written in different orders. This is not documented anywhere though. Second, the behavior of index parameter is totally different from that in df1: the resulting index will be the specified index but it does not overwrite the current index, instead only rows with index label in the specified index will be retained, other labels specified with no data present in somedictofdicts will be NaN-filled. Here is an example:
+
+    dod1 = {'2':{'c':4, 'd':2}, '1':{'b':2, 'a':1}}
+    dod2 = {'1':{'b':2, 'a':1}, '2':{'c':4, 'd':2}}
+    df1 = pd.DataFrame(dod1)
+    df2 = pd.DataFrame(dod2)
+    df3 = pd.DataFrame(dod1, index=['a', 'e', 'f'])
+
+    then we have
+
+    df1 =
+         2    1
+    a  NaN  1.0
+    b  NaN  2.0
+    c  4.0  NaN
+    d  2.0  NaN
+
+    df2 =
+         1    2
+    a  1.0  NaN
+    b  2.0  NaN
+    c  NaN  4.0
+    d  NaN  2.0
+
+    df3 =
+        2    1
+    a NaN  1.0
+    e NaN  NaN
+    f NaN  NaN
+
+    This behavior actually makes sense because of the unorderedness and because in reality we might have dict data sources that does not specify all the rows/columns we want (see the example below), but it should have a separate API because of its different behavior. More importantly, this different behavior should be clearly documented.
+
+    dict1 = {'Name':['Haoran', 'Kenneth'], 'Chinese Name': ['舒浩然', '杨灿'], 'Gender':['M', 'M']}
+    dict2 = {'Name':['Josh'], 'Gender':['M']}
+
+    # we want both DataFrames to have three columns: 'Name', 'Gender' and 'Chinese Name'
+
+    complete_columns = ['Name', 'Gender', 'Chinese Name']
+    df1 = pd.DataFrame(dict1, columns=complete_columns)
+    df2 = pd.DataFrame(dict2, columns=complete_columns)
+
+    then we will have
+
+    df1 = 
+          Name Gender  Chinese Name
+    0   Haoran      M        舒浩然
+    1  Kenneth      M          杨灿
+
+   df2 =
+       Name Gender Chinese Name
+    0  Josh      M          NaN
+
+-------------------------------------------------------------------
+User code after modification:
+    dod = {'2':{'c':4, 'd':2}, '1':{'b':2, 'a':1}}
+    df = pd.DataFrame.from_dict(dod).fit_to_index(['a', 'e', 'f']).build()
+===================================================================
+
+3. Order parameters
+
+    The DataFrame.from_records() factory provides a handful of options as well. Two of them are: exclude and columns. Their documentations are:
+
+    exclude : sequence, default None
+        Columns or fields to exclude
+
+    columns : sequence, default None
+        Column names to use. If the passed data do not have names associated with them, this argument provides names for the columns.
+        ...
+
+    A couple of questions would arise naturally: 1. Which one is executed first? exclude or (set_)columns? Both have corresponding usecases. 2. Why exclude only works for dropping columns? Can't I drop rows? It sounds like a fair requirement. 3. Why can't we have include? I have a record ndarray of 10000 rows in which I only want 1000 of them.
+
+    This is the main usecase that drives us the choose the Builder pattern instead of canonical factories. The Builder pattern natually incorporates the concept of order, and if we are going to have exclude rows and include columns/rows, it would be wierd if they are four separate options which technically could be used together, or an optional flag plus yet another optional parameter that always have to be specified together.
+
+-------------------------------------------------------------------
+User code after modification:
+	df = pd.DataFrame.from_ndarray(myarray, copy=True)\
+	                 .set_index(['a', 'b'])\
+	                 .set_columns(['name', 'age', 'gender'])\
+	                 .exclude_columns(['name'])\	        # I specifically want the reader and
+	                                                        # me to know that 'name' info is hidden
+	                 .astype(np.float64)\
+	                 .build()
+
+	df = pd.DataFrame.from_ndarray(myarray, copy=True)\
+	                 .exclude_columns(0:11)\
+	                 .set_index(['a', 'b'])\
+	                 .set_columns(['age', 'gender'])\	# I don't care about what is hidden,
+	                                                        # and actually there are too many of
+	                                                        # them that I don't want to give them
+	                                                        # place-holder names before I could
+	                                                        # exclude them
+	                 .astype(np.float64)\
+	                 .build()
+===================================================================
