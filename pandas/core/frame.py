@@ -8123,6 +8123,25 @@ class DataFrame(NDFrame):
                 option()
             return self.product
 
+    class DataFrameBuilder(Builder):
+        def __init__(self, data, copy):
+            if not isinstance(data, DataFrame):
+                raise TypeError("DataFrame.from_dataframe() accepts "
+                                "only data type DataFrame, "
+                                "got {0!r}".format(type(data).__name__))
+            if not isinstance(copy, bool):
+                raise TypeError("Parameter copy has to be a boolean, "
+                                "got {0!r}".format(type(copy).__name__))
+            super().__init__(data)
+            self.num_rows, self.num_cols = data.shape
+            self.copy = copy
+
+        def build(self):
+            self.product = DataFrame(self.data, dtype=self.dtype, copy=self.copy)
+            for option in self.options:
+                option()
+            return self.product
+
     class ListBuilder(Builder):
         def __init__(self, data):
             if not isinstance(data, list):
@@ -8295,7 +8314,29 @@ class DataFrame(NDFrame):
         --------
         """
         return cls.DictBuilder(data, orient)
+
+    @classmethod
     # ----------------------------------------------------------------------
+    def from_dataframe(cls, data, copy=False):
+        """
+        Constructs a DataFrame Builder based on another DataFrame
+
+        Parameters
+        ----------
+        data : DataFrame
+        copy : boolean, default to False
+            If set to True, data will be copied into the DataFrame
+            object built.
+
+        Returns
+        -------
+        DataFrame.DictBuilder
+            A DataFrame.Builder instance that builds DataFrames from DataFrames.
+
+        Examples
+        --------
+        """
+        return cls.DataFrameBuilder(data, copy)
 
     # ----------------------------------------------------------------------
     # Add plotting methods to DataFrame
