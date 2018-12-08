@@ -1,0 +1,41 @@
+from pandas import DatetimeIndex
+
+# --------------------------------------------------------------------
+# Before: easy to misuse
+
+# Client wants to create a DatetimeIndex from some datetime strings.
+# However, if the client specifies data and start at same time, 
+# start will get dropped silently.
+index_1 = DatetimeIndex(data=['10/1/2018', '11/1/2018'], start='2018-10-01')
+
+# Client wants to create a DatetimeIndex based on some constraints.
+# For the generated range, the client wants to include both endpoints.
+# However this code produces an error,
+# because closed must be None to represent 'both', 
+# while left is 'left' and right is 'right'.
+try:
+    index_2 = DatetimeIndex(start='2018-10-01', periods=10, freq='D', closed='both')
+except ValueError:
+    print "An error"
+
+# Frequency is used with data but is not 'D', there will be an error.
+try:
+    index_3 = DatetimeIndex(data=['10/1/2018', '11/1/2018'], freq='H')
+except ValueError:
+    print "Another error"
+
+
+# --------------------------------------------------------------------
+# Now: new APIs help avoid above issues
+
+# Clearly seperates from_data and from_range 
+# And both of them work!
+index_1 = DatetimeIndex.from_data(['10/1/2018', '11/1/2018']).build()
+index_1 = DatetimeIndex.from_range(start='2018-10-01', periods=10, freq='D').build()
+
+# Use Enum to specify options for closed
+index_2 = builder.from_range(start='2018-08-31', periods=10, freq='D', 
+                             closed=DatetimeIndex.ClosedRange.BOTH).build()
+
+# The API itself directly avoids using data and freq together,
+# so it is impossible for client to get an error like above

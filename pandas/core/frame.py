@@ -7742,6 +7742,10 @@ class DataFrame(NDFrame):
     COLUMNS = 0
     INDEX = 1
 
+    class AXIS(object):
+        ALONG_ROW = 0
+        ALONG_COL = 1
+
     class Builder(object):
 
         def __init__(self, data):
