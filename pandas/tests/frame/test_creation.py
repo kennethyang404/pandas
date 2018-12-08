@@ -37,7 +37,7 @@ class TestDataFrameCreation(TestData):
     def test_creation_mixed(self):
         index, data = tm.getMixedTypeDict()
 
-        indexed_frame = DataFrame.from_dict(data, orient=DataFrame.COLUMNS).fit_to_index(index).build()  # noqa
+        indexed_frame = DataFrame.from_dict(data, orient=DataFrame.COLUMNS).set_index(index).build()  # noqa
         unindexed_frame = DataFrame.from_dict(data, orient=DataFrame.COLUMNS).build()  # noqa
 
         assert self.mixed_frame['foo'].dtype == np.object_
@@ -89,7 +89,7 @@ class TestDataFrameCreation(TestData):
         result = DataFrame.from_list([DataFrame([])]).build()
         assert result.shape == (1, 0)
 
-        result = DataFrame.from_dataframe([DataFrame(dict(A=lrange(5)))]).build()
+        result = DataFrame.from_list([DataFrame(dict(A=lrange(5)))]).build()
         assert isinstance(result.iloc[0, 0], DataFrame)
 
     def test_creation_dict(self):
@@ -106,14 +106,6 @@ class TestDataFrameCreation(TestData):
                         index=self.ts1.index, name='col2')
         tm.assert_series_equal(exp, frame['col2'])
 
-        frame = DataFrame.from_dict({'col1': self.ts1,
-                           'col2': self.ts2}, orient=DataFrame.COLUMNS) \
-                          .fit_to_columns(['col2', 'col3', 'col4']).build()
-
-        assert len(frame) == len(self.ts2)
-        assert 'col1' not in frame
-        assert isna(frame['col3']).all()
-
         # Length-one dict micro-optimization
         frame = DataFrame.from_dict({'A': {'1': 1, '2': 2}}, orient=DataFrame.COLUMNS).build()
         tm.assert_index_equal(frame.index, pd.Index(['1', '2']))
@@ -124,12 +116,6 @@ class TestDataFrameCreation(TestData):
         result = DataFrame.from_dict(data, orient=DataFrame.COLUMNS).build()
         expected = DataFrame.from_dict({k: list(v) for k, v in compat.iteritems(data)}, orient=DataFrame.COLUMNS).build()
         tm.assert_frame_equal(result, expected, check_dtype=False)
-
-    def test_creation_ndarray(self):
-        self._check_basic_creation(np.ones)
-
-        frame = DataFrame.from_list(['foo', 'bar']).set_index([0, 1]).set_columns(['A']).build()
-        assert len(frame) == 2
 
     def test_creation_DataFrame(self):
         df = DataFrame.from_dataframe(self.frame).build()
@@ -151,7 +137,7 @@ class TestDataFrameCreation(TestData):
                 OrderedDict([['a', 1.5], ['b', 3], ['c', 4]]),
                 OrderedDict([['b', 3], ['c', 4], ['d', 6]])]
 
-        result = DataFrame.from_dict(data, orient=DataFrame.COLUMNS).build()
+        result = DataFrame.from_list(data).build()
         expected = DataFrame.from_dict(dict(zip(range(len(data)), data)),
                                        orient=DataFrame.INDEX).build()
         tm.assert_frame_equal(result, expected.reindex(result.index))
