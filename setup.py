@@ -675,7 +675,9 @@ for name, data in ext_data.items():
                     include_dirs=include,
                     language=data.get('language', 'c'),
                     define_macros=data.get('macros', macros),
-                    extra_compile_args=extra_compile_args)
+                    extra_compile_args=extra_compile_args + ['-stdlib=libc++'],
+                    extra_link_args=["-stdlib=libc++", "-mmacosx-version-min=10.9"])
+
 
     extensions.append(obj)
 
