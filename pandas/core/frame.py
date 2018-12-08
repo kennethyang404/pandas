@@ -8316,7 +8316,6 @@ class DataFrame(NDFrame):
         return cls.DictBuilder(data, orient)
 
     @classmethod
-    # ----------------------------------------------------------------------
     def from_dataframe(cls, data, copy=False):
         """
         Constructs a DataFrame Builder based on another DataFrame
