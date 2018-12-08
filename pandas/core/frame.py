@@ -7742,7 +7742,7 @@ class DataFrame(NDFrame):
     COLUMNS = 0
     INDEX = 1
 
-    class Builder:
+    class Builder(object):
 
         def __init__(self, data):
             self.data = data
@@ -8104,7 +8104,7 @@ class DataFrame(NDFrame):
             if not isinstance(copy, bool):
                 raise TypeError("Parameter copy has to be a boolean, "
                                 "got {0!r}".format(type(copy).__name__))
-            super().__init__(data)
+            super(self.__class__, self).__init__(data)
             ndim = data.ndim
             if ndim == 1:
                 self.num_rows = data.shape[0]
@@ -8132,7 +8132,7 @@ class DataFrame(NDFrame):
             if not isinstance(copy, bool):
                 raise TypeError("Parameter copy has to be a boolean, "
                                 "got {0!r}".format(type(copy).__name__))
-            super().__init__(data)
+            super(self.__class__, self).__init__(data)
             self.num_rows, self.num_cols = data.shape
             self.copy = copy
 
@@ -8157,7 +8157,7 @@ class DataFrame(NDFrame):
             else:
                 self.num_rows = 0
                 self.num_cols = 0
-            super().__init__(data)
+            super(self.__class__, self).__init__(data)
 
         def build(self):
             self.product = DataFrame(self.data, dtype=self.dtype)
@@ -8173,7 +8173,7 @@ class DataFrame(NDFrame):
                                 "got {0!r}".format(type(data).__name__))
             self.num_rows = 0    # placeholder
             self.num_cols = 0    # placeholder
-            super().__init__(data)
+            super(self.__class__, self).__init__(data)
             self.orient = orient
             self.columns_dict = False
             self.index_dict = False
@@ -8198,13 +8198,13 @@ class DataFrame(NDFrame):
             if self.index_dict:
                 raise AssertionError("set_index() not supported for index from dict keys.")
             else:
-                return super().set_index(index)
+                return super(self.__class__, self).set_index(index)
 
         def set_columns(self, columns):
             if self.columns_dict:
                 raise AssertionError("set_columns() not supported for columns from dict keys.")
             else:
-                return super().set_columns(columns)
+                return super(self.__class__, self).set_columns(columns)
 
         def _fit_to_index(self):
             assert self.product is not None
