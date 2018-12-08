@@ -998,7 +998,7 @@ class DataFrame(NDFrame):
     # IO methods (to / from other formats)
 
     @classmethod
-    def from_dict(cls, data, orient='columns', dtype=None, columns=None):
+    def _from_dict(cls, data, orient='columns', dtype=None, columns=None):
         """
         Construct DataFrame from dict of array-like or dicts.
 
@@ -3877,9 +3877,32 @@ class DataFrame(NDFrame):
     def shift(self, periods=1, freq=None, axis=0):
         return super(DataFrame, self).shift(periods=periods, freq=freq,
                                             axis=axis)
+    def set_columns(self, columns):
+        if not isinstance(columns, list):
+            raise TypeError("DataFrame.set_columns() accepts "
+                            "only data type list, "
+                            "got {0!r}".format(type(columns).__name__))
+        if len(columns) != self.shape[1]:
+            raise ValueError("Parameter columns must have the same number "
+                             "of elements as the number of columns in target "
+                             "DataFrame.")
+        self.columns = columns
+        return self
 
-    def set_index(self, keys, drop=True, append=False, inplace=False,
-                  verify_integrity=False):
+    def set_index(self, index):
+        if not isinstance(index, list):
+            raise TypeError("DataFrame.set_index() accepts "
+                            "only data type list, "
+                            "got {0!r}".format(type(index).__name__))
+        if len(index) != self.shape[0]:
+            raise ValueError("Parameter index must have the same number "
+                             "of elements as the number of rows in target "
+                             "DataFrame.")
+        self.index = index
+        return self
+
+    def set_index_from_data(self, keys, drop=True, append=False, inplace=False,
+                            verify_integrity=False):
         """
         Set the DataFrame index using existing columns.
 
@@ -7712,6 +7735,567 @@ class DataFrame(NDFrame):
                 algorithms.isin(self.values.ravel(),
                                 values).reshape(self.shape), self.index,
                 self.columns)
+
+    # ----------------------------------------------------------------------
+    # Builder pattern
+    # FLAGS
+    COLUMNS = 0
+    INDEX = 1
+
+    class Builder:
+
+        def __init__(self, data):
+            self.data = data
+            self.options = []
+            self.dtype = None
+            self.index_set = False
+            self.index_set_from_data = False
+            self.columns_set = False
+            self.index = None
+            self.columns = None
+            self.product = None
+            self.exclude_columns_set = False
+            self.include_columns_set = False
+            self.exclude_rows_set = False
+            self.include_rows_set = False
+
+        def astype(self, dtype):
+            """
+            Force the type of resulting DataFrame.
+
+            Parameters
+            ----------
+            dtype : data type, can be numpy.dtype
+
+            Returns
+            -------
+            DataFrame.Builder
+                The calling Builder itself.
+            """
+            # TODO: check type of dtype
+            self.dtype = dtype
+            return self
+
+        def _set_index(self):
+            assert self.product is not None
+            self.product.index = self.index
+
+        def set_index(self, index):
+            """
+            Specify the index of a DataFrame to be built, can only be called
+            once per Builder and always overwrite existing index information
+            in data source. Raises error if called on a Builder which has
+            called set_index_from_data().
+
+            Only to be used when current index information does not come from
+            dict keys.
+
+            Parameters
+            ----------
+            index : Index or array-like
+                The new index for the DataFrame to be built. Must have exact
+                the same number of items as there are rows in the data source.
+
+            Returns
+            -------
+            DataFrame.Builder
+                The calling Builder itself.
+            """
+            if self.index_set_from_data:
+                raise AssertionError("set_index_from_data() has already been called.")
+            if self.index_set:
+                raise AssertionError("set_index() has already been called once.")
+            index_len = len(index)
+            if index_len != self.num_rows:
+                raise ValueError("Number of rows in data inconsistent "
+                                 "with length of index ({} != {})"
+                                 .format(self.num_rows, index_len))
+            self.index = index
+            self.index_set = True
+            self.options.append(self._set_index)
+            return self
+
+        def _set_columns(self):
+            assert self.product is not None
+            self.product.columns = self.columns
+
+        def set_columns(self, columns):
+            """
+            Specify the columns of a DataFrame to be built, can only be called
+            once per Builder and always overwrite existing columns information
+            in data source.
+
+            Only to be used when current columns information does not come from
+            dict keys.
+
+            Parameters
+            ----------
+            columns : Index or array-like
+                The new columns for the DataFrame to be built. Must have exact
+                the same number of items as there are columns in the data source.
+
+            Returns
+            -------
+            DataFrame.Builder
+                The calling Builder itself.
+            """
+            if self.columns_set:
+                raise AssertionError("set_columns() has already been called once.")
+            columns_len = len(columns)
+            if columns_len != self.num_cols:
+                raise ValueError("Number of columns in data inconsistent "
+                                 "with length of columns to set ({} != {})"
+                                 .format(self.num_cols, columns_len))
+            self.columns = columns
+            self.columns_set = True
+            self.options.append(self._set_columns)
+            return self
+
+        def _exclude_columns(self):
+            assert self.product is not None
+            self.product.drop(self.columns_to_exclude, axis=1, inplace=True)
+
+        def exclude_columns(self, columns):
+            """
+            Exclude the specified columns from DataFrame object to be built.
+            Can only be called once per Builder and cannot be called at the
+            same time with include_columns().
+
+            Parameters
+            ----------
+            columns: list of column labels or column indices to exclude
+
+            Returns
+            -------
+            DataFrame.Builder
+                The calling Builder itself.
+            """
+            if not isinstance(columns, list):
+                raise TypeError("DataFrame.Builder.exclude_columns() accepts "
+                                "only list of columns, "
+                                "got {0!r}".format(type(columns).__name__))
+            if self.include_columns_set:
+                raise AssertionError("At most one of exclude_columns() and "
+                                     "include_columns() can be specified.")
+            if self.exclude_columns_set:
+                raise AssertionError("DataFrame.Builder.exclude_columns() "
+                                     "can be called at most once.")
+            self.exclude_columns_set = True
+            self.columns_to_exclude = columns
+            self.options.append(self._exclude_columns)
+            self.num_cols -= len(columns)
+            return self
+
+        def _exclude_rows(self):
+            assert self.product is not None
+            self.product.drop(self.rows_to_exclude, axis=0, inplace=True)
+
+        def exclude_rows(self, rows):
+            """
+            Exclude the specified rows from DataFrame object to be built.
+            Can only be called once per Builder and cannot be called at the
+            same time with include_rows().
+
+            Parameters
+            ----------
+            rows: list of row indices to exclude
+
+            Returns
+            -------
+            DataFrame.Builder
+                The calling Builder itself.
+            """
+            if not isinstance(rows, list):
+                raise TypeError("DataFrame.Builder.exclude_rows() accepts "
+                                "only list of rows, "
+                                "got {0!r}".format(type(rows).__name__))
+            if self.include_rows_set:
+                raise AssertionError("At most one of exclude_rows() and "
+                                     "include_rows() can be specified.")
+            if self.exclude_rows_set:
+                raise AssertionError("DataFrame.Builder.exclude_rows() "
+                                     "can be called at most once.")
+            self.exclude_rows_set = True
+            self.rows_to_exclude = rows
+            self.options.append(self._exclude_rows)
+            self.num_rows -= len(rows)
+            return self
+
+        def _include_columns(self):
+            assert self.product is not None
+            self.product = self.product[self.columns_to_include]
+
+        def include_columns(self, columns):
+            """
+            Only include the specified columns from DataFrame object to
+            be built. Can only be called once per Builder and cannot be
+            called at the same time with exclude_columns().
+
+            Parameters
+            ----------
+            columns: list of column labels or column indices to include
+
+            Returns
+            -------
+            DataFrame.Builder
+                The calling Builder itself.
+            """
+            if not isinstance(columns, list):
+                raise TypeError("DataFrame.Builder.include_columns() accepts "
+                                "only list of columns, "
+                                "got {0!r}".format(type(columns).__name__))
+            if self.exclude_columns_set:
+                raise AssertionError("At most one of exclude_columns() and "
+                                     "include_columns() can be specified.")
+            if self.include_columns_set:
+                raise AssertionError("DataFrame.Builder.include_columns() "
+                                     "can be called at most once.")
+            self.include_columns_set = True
+            self.columns_to_include = columns
+            self.options.append(self._include_columns)
+            self.num_cols = len(columns)
+            return self
+
+        def _include_rows(self):
+            assert self.product is not None
+            self.product = self.product.loc[self.rows_to_include]
+
+        def include_rows(self, rows):
+            """
+            Only include the specified rows from DataFrame object to
+            be built. Can only be called once per Builder and cannot be
+            called at the same time with exclude_rows().
+
+            Parameters
+            ----------
+            rows: list of row indices to include
+
+            Returns
+            -------
+            DataFrame.Builder
+                The calling Builder itself.
+            """
+            if not isinstance(rows, list):
+                raise TypeError("DataFrame.Builder.include_rows() accepts "
+                                "only list of rows, "
+                                "got {0!r}".format(type(rows).__name__))
+            if self.exclude_rows_set:
+                raise AssertionError("At most one of exclude_rows() and "
+                                     "include_rows() can be specified.")
+            if self.include_rows_set:
+                raise AssertionError("DataFrame.Builder.include_rows() "
+                                     "can be called at most once.")
+            self.include_rows_set = True
+            self.rows_to_include = rows
+            self.options.append(self._include_rows)
+            self.num_rows = len(rows)
+            return self
+
+        def _set_index_from_data(self):
+            assert self.product is not None
+            self.product.set_index_from_data(self.index_keys, drop=self.index_drop,
+                                             append=self.index_append, inplace=True)
+
+        def set_index_from_data(self, keys, drop=True, append=False):
+            """
+            Specify the index of a DataFrame to be built, can only be called
+            once per Builder. Raises error if called on a Builder which has
+            called set_index().
+
+            Only to be used when current index information does not come from
+            dict keys.
+
+            Parameters
+            ----------
+            keys : column label or list of column labels / arrays
+            drop : boolean, default True
+                Delete columns to be used as the new index.
+            append : boolean, default False
+                Whether to append columns to existing index.
+
+            Returns
+            -------
+            DataFrame.Builder
+                The calling Builder itself.
+            """
+            if self.index_set:
+                raise AssertionError("set_index() has already been called.")
+            if self.index_set_from_data:
+                raise AssertionError("set_index_from_data() has already been called once.")
+            self.index_set_from_data = True
+            self.index_keys = keys
+            self.index_drop = drop
+            self.index_append = append
+            if drop:
+                self.num_cols -= len(keys)
+            self.options.append(self._set_index_from_data)
+            return self
+
+        def fit_to_index(self, index):
+            """
+            To be called only on DictBuilder and when the index is specified by
+            dict keys.
+
+            Fit the resulting DataFrame to a pre-defined index when the current
+            index is deduced from dict keys. Any row with index not present in
+            the specified index will be excluded and indices that have no data
+            present in the input dict will be NaN filled.
+
+            Parameters
+            ----------
+            index : Index or array-like
+                The index to fit for the resulting DataFrame.
+
+            Returns
+            -------
+            DataFrame.Builder
+                The calling Builder itself.
+
+            Examples
+            -------
+            """
+            raise AssertionError("fit_to_index() is only supported when original index is deduced from dict keys.")
+
+        def fit_to_columns(self, columns):
+            """
+            To be called only on DictBuilder and when the columns are specified by
+            dict keys.
+
+            Fit the resulting DataFrame to pre-defined columns when the current
+            columns are deduced from dict keys. Any column with label not present in
+            the specified columns will be excluded and labels that have no data
+            present in the input dict will be NaN filled.
+
+            Parameters
+            ----------
+            columns : Index or array-like
+                The columns to fit for the resulting DataFrame.
+
+            Returns
+            -------
+            DataFrame.Builder
+                The calling Builder itself.
+
+            Examples
+            -------
+            """
+            raise AssertionError("fit_to_columns() is only supported when original columns is deduced from dict keys.")
+
+        def build(self):
+            """
+            Build the configured DataFrame.
+
+            Parameters
+            ----------
+
+            Returns
+            -------
+            DataFrame
+                A new DataFrame object.
+            """
+            pass
+
+    class NdarrayBuilder(Builder):
+        def __init__(self, data, copy):
+            if not isinstance(data, np.ndarray):
+                raise TypeError("DataFrame.from_ndarray() accepts "
+                                "only data type numpy.ndarray, "
+                                "got {0!r}".format(type(data).__name__))
+            if not isinstance(copy, bool):
+                raise TypeError("Parameter copy has to be a boolean, "
+                                "got {0!r}".format(type(copy).__name__))
+            super().__init__(data)
+            ndim = data.ndim
+            if ndim == 1:
+                self.num_rows = data.shape[0]
+                self.num_cols = 1
+            elif ndim == 2:
+                self.num_rows = data.shape[0]
+                self.num_cols = data.shape[1]
+            else:
+                raise ValueError("Input ndarray should be at most "
+                                 "two dimensional, got {}".format(data.shape))
+            self.copy = copy
+
+        def build(self):
+            self.product = DataFrame(self.data, dtype=self.dtype, copy=self.copy)
+            for option in self.options:
+                option()
+            return self.product
+
+    class ListBuilder(Builder):
+        def __init__(self, data):
+            if not isinstance(data, list):
+                raise TypeError("DataFrame.from_ndarray() accepts "
+                                "only data type list, "
+                                "got {0!r}".format(type(data).__name__))
+            self.num_rows = len(data)
+            if self.num_rows > 0:
+                if isinstance(data[0], list):
+                    self.num_cols = len(data[0])
+                else:
+                    self.num_cols = 1
+            else:
+                self.num_rows = 0
+                self.num_cols = 0
+            super().__init__(data)
+
+        def build(self):
+            self.product = DataFrame(self.data, dtype=self.dtype)
+            for option in self.options:
+                option()
+            return self.product
+
+    class DictBuilder(Builder):
+        def __init__(self, data, orient):
+            if not isinstance(data, dict):
+                raise TypeError("DataFrame.from_dict() accepts "
+                                "only data type dict, "
+                                "got {0!r}".format(type(data).__name__))
+            self.num_rows = 0    # placeholder
+            self.num_cols = 0    # placeholder
+            super().__init__(data)
+            self.orient = orient
+            self.columns_dict = False
+            self.index_dict = False
+            self.index_fitted = False
+            self.columns_fitted = False
+            if self.orient == DataFrame.COLUMNS:
+                self.columns_dict = True
+                if len(data) > 0:
+                    if isinstance(data[list(data)[0]], dict):
+                        self.index_dict = True
+                    else:
+                        self.num_rows = len(data[list(data)[0]])
+            else:
+                self.index_dict = True
+                if len(data) > 0:
+                    if isinstance(data[list(data)[0]], dict):
+                        self.columns_dict = True
+                    else:
+                        self.num_cols = len(data[list(data)[0]])
+
+        def set_index(self, index):
+            if self.index_dict:
+                raise AssertionError("set_index() not supported for index from dict keys.")
+            else:
+                return super().set_index(index)
+
+        def set_columns(self, columns):
+            if self.columns_dict:
+                raise AssertionError("set_columns() not supported for columns from dict keys.")
+            else:
+                return super().set_columns(columns)
+
+        def _fit_to_index(self):
+            assert self.product is not None
+            self.product = self.product.reindex(index=self.index)
+
+        def fit_to_index(self, index):
+            if not self.index_dict:
+                raise AssertionError("fit_to_index() only supports index from dict keys.")
+            if self.index_fitted:
+                raise AssertionError("fit_to_index() can only be called once.")
+            self.index = index
+            self.index_fitted = True
+            self.options.append(self._fit_to_index)
+            return self
+
+        def _fit_to_columns(self):
+            assert self.product is not None
+            self.product = self.product.reindex(columns=self.columns)
+
+        def fit_to_columns(self, columns):
+            if not self.columns_dict:
+                raise AssertionError("fit_to_columns() only supports columns from dict keys.")
+            if self.columns_fitted:
+                raise AssertionError("fit_to_columns() can only be called once.")
+            self.columns = columns
+            self.columns_fitted = True
+            self.options.append(self._fit_to_columns)
+            return self
+
+        def build(self):
+            if self.orient == DataFrame.COLUMNS:
+                orient = 'columns'
+            else:
+                orient = 'index'
+            self.product = DataFrame._from_dict(self.data, orient=orient, dtype=self.dtype)
+            if self.columns_dict:
+                self.num_cols = self.product.shape[1]
+            if self.index_dict:
+                self.num_rows = self.product.shape[0]
+            for option in self.options:
+                option()
+            return self.product
+
+    @classmethod
+    def from_ndarray(cls, data, copy=False):
+        """
+        Constructs a DataFrame Builder based on ndarray input.
+
+        Parameters
+        ----------
+        data : ndarray, structured or homogeneous
+            If structured, each array element will be one row,
+            and each element field will be one column.
+        copy : boolean, default to False
+            If set to True, data will be copied into the DataFrame
+            object built.
+
+        Returns
+        -------
+        DataFrame.NdarrayBuilder
+            A DataFrame.Builder instance that builds DataFrames from ndarrays.
+
+        Examples
+        --------
+        """
+        return cls.NdarrayBuilder(data, copy)
+
+    @classmethod
+    def from_list(cls, data):
+        """
+        Constructs a DataFrame Builder based on list input
+
+        Parameters
+        ----------
+        data : list of array-like
+            number of rows will be that of array-like elements in the list
+
+        Returns
+        -------
+        DataFrame.ListBuilder
+            A DataFrame.Builder instance that builds DataFrames from lists.
+
+        Examples
+        --------
+        """
+        return cls.ListBuilder(data)
+
+    @classmethod
+    def from_dict(cls, data, orient):
+        """
+        Constructs a DataFrame Builder based on list input
+
+        Parameters
+        ----------
+        data : dict of dicts or dict of array-like
+        orient : DataFrame.COLUMNS or DataFrame.INDEX
+            If set to DataFrame.COLUMNS, then the keys of top-level dict will be
+            used as labels of columns; else if set to DataFrame.INDEX, those keys
+            will be index labels.
+
+        Returns
+        -------
+        DataFrame.DictBuilder
+            A DataFrame.Builder instance that builds DataFrames from dicts.
+
+        Examples
+        --------
+        """
+        return cls.DictBuilder(data, orient)
+    # ----------------------------------------------------------------------
 
     # ----------------------------------------------------------------------
     # Add plotting methods to DataFrame
